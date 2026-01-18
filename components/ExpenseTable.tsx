@@ -26,6 +26,9 @@ const ExpenseTable: React.FC<ExpenseTableProps> = ({
     minimumFractionDigits: 0,
   });
 
+  const formatInput = (num: number) => num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  const parseInput = (str: string) => Number(str.replace(/[^0-9]/g, ''));
+
   return (
     <div className="space-y-8">
       {categories.map((category) => {
@@ -81,9 +84,10 @@ const ExpenseTable: React.FC<ExpenseTableProps> = ({
                         <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 rounded-xl px-2 py-1.5">
                           <span className="text-[9px] text-slate-600 font-bold">Rp</span>
                           <input
-                            type="number"
-                            value={item.budget}
-                            onChange={(e) => onUpdate(item.id, 'budget', Number(e.target.value))}
+                            type="text"
+                            inputMode="numeric"
+                            value={formatInput(item.budget)}
+                            onChange={(e) => onUpdate(item.id, 'budget', parseInput(e.target.value))}
                             className="w-full bg-transparent border-none outline-none font-black text-xs text-white"
                           />
                         </div>
@@ -93,9 +97,10 @@ const ExpenseTable: React.FC<ExpenseTableProps> = ({
                         <div className={`flex items-center gap-1 border rounded-xl px-2 py-1.5 ${itemRatio > 1 ? 'bg-rose-500/10 border-rose-500/30' : 'bg-slate-900 border-slate-800'}`}>
                           <span className="text-[9px] text-slate-600 font-bold">Rp</span>
                           <input
-                            type="number"
-                            value={item.actual}
-                            onChange={(e) => onUpdate(item.id, 'actual', Number(e.target.value))}
+                            type="text"
+                            inputMode="numeric"
+                            value={formatInput(item.actual)}
+                            onChange={(e) => onUpdate(item.id, 'actual', parseInput(e.target.value))}
                             className={`w-full bg-transparent border-none outline-none font-black text-xs ${itemRatio > 1 ? 'text-rose-400' : 'text-indigo-400'}`}
                           />
                         </div>

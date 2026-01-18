@@ -10,6 +10,7 @@ import CloudSync from './components/CloudSync';
 import AlertBanner from './components/AlertBanner';
 import YearlyView from './components/YearlyView';
 import PWAInstaller from './components/PWAInstaller';
+import Login from './components/Login'; // Import komponen Login
 import { 
   Plus, 
   ChevronLeft, 
@@ -19,10 +20,12 @@ import {
   Calendar,
   Database,
   ShieldCheck,
-  BrainCircuit
+  BrainCircuit,
+  LogOut
 } from 'lucide-react';
 
 const App: React.FC = () => {
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const getCurrentMonthKey = () => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -34,8 +37,46 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'charts' | 'yearly' | 'data'>('dashboard');
 
   const selectedYear = useMemo(() => selectedMonth.split('-')[0], [selectedMonth]);
+  
+  const formatInput = (num: number) => num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  const parseInput = (str: string) => Number(str.replace(/[^0-9]/g, ''));
+
+  // FIX: Moved hooks to the top level to ensure they are called on every render.
+  const currentData = useMemo(() => {
+    return allMonthsData[selectedMonth] || { income: 0, items: [], categories: [], year: selectedYear };
+  }, [selectedMonth, allMonthsData, selectedYear]);
+
+  const activeAlerts = useMemo(() => {
+    return currentData.categories
+      .map(category => {
+        const catItems = currentData.items.filter(item => item.category === category);
+        const budget = catItems.reduce((sum, item) => sum + item.budget, 0);
+        const actual = catItems.reduce((sum, item) => sum + item.actual, 0);
+        const ratio = budget > 0 ? actual / budget : 0;
+        if (ratio >= 0.9 && !dismissedAlerts.has(`${selectedMonth}-${category}`)) {
+          return { category, ratio, type: ratio >= 1.0 ? ('critical' as const) : ('warning' as const) };
+        }
+        return null;
+      })
+      .filter((alert): alert is any => alert !== null);
+  }, [currentData, dismissedAlerts, selectedMonth]);
+
+  const displayMonthName = useMemo(() => {
+    const [y, m] = selectedMonth.split('-');
+    return new Date(parseInt(y), parseInt(m) - 1).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+  }, [selectedMonth]);
+
+
+  // Cek status login saat aplikasi pertama kali dimuat
+  useEffect(() => {
+    const loggedIn = sessionStorage.getItem('is-auth-aniq-finance');
+    if (loggedIn === 'true') {
+      setIsAuthenticated(true);
+    }
+  }, []);
 
   useEffect(() => {
+    if (!isAuthenticated) return; // Jangan load data jika belum login
     const saved = localStorage.getItem('arthaku_master_data');
     if (saved) {
       try {
@@ -44,7 +85,7 @@ const App: React.FC = () => {
         console.error("Gagal memuat data master");
       }
     }
-  }, []);
+  }, [isAuthenticated]);
 
   useEffect(() => {
     if (Object.keys(allMonthsData).length > 0) {
@@ -53,6 +94,7 @@ const App: React.FC = () => {
   }, [allMonthsData]);
 
   useEffect(() => {
+    if (!isAuthenticated) return;
     if (!allMonthsData[selectedMonth]) {
       const sortedMonths = Object.keys(allMonthsData).sort().reverse();
       const lastMonthKey = sortedMonths.find(m => m < selectedMonth) || sortedMonths[0];
@@ -78,26 +120,25 @@ const App: React.FC = () => {
       setAllMonthsData(prev => ({ ...prev, [selectedMonth]: newData }));
       setDismissedAlerts(new Set()); 
     }
-  }, [selectedMonth, allMonthsData]);
+  }, [selectedMonth, allMonthsData, isAuthenticated]);
 
-  const currentData = useMemo(() => {
-    return allMonthsData[selectedMonth] || { income: 0, items: [], categories: [], year: selectedYear };
-  }, [selectedMonth, allMonthsData, selectedYear]);
+  const handleLoginSuccess = () => {
+    sessionStorage.setItem('is-auth-aniq-finance', 'true');
+    setIsAuthenticated(true);
+  };
 
-  const activeAlerts = useMemo(() => {
-    return currentData.categories
-      .map(category => {
-        const catItems = currentData.items.filter(item => item.category === category);
-        const budget = catItems.reduce((sum, item) => sum + item.budget, 0);
-        const actual = catItems.reduce((sum, item) => sum + item.actual, 0);
-        const ratio = budget > 0 ? actual / budget : 0;
-        if (ratio >= 0.9 && !dismissedAlerts.has(`${selectedMonth}-${category}`)) {
-          return { category, ratio, type: ratio >= 1.0 ? ('critical' as const) : ('warning' as const) };
-        }
-        return null;
-      })
-      .filter((alert): alert is any => alert !== null);
-  }, [currentData, dismissedAlerts, selectedMonth]);
+  const handleLogout = () => {
+    if (confirm('Apakah Anda yakin ingin keluar?')) {
+      sessionStorage.removeItem('is-auth-aniq-finance');
+      setIsAuthenticated(false);
+      // Optional: clear data on logout
+      // setAllMonthsData({}); 
+    }
+  };
+
+  if (!isAuthenticated) {
+    return <Login onLoginSuccess={handleLoginSuccess} />;
+  }
 
   const updateCurrentMonthData = (newData: Partial<MonthlyBudget>) => {
     setAllMonthsData(prev => ({ ...prev, [selectedMonth]: { ...currentData, ...newData } }));
@@ -145,11 +186,6 @@ const App: React.FC = () => {
     setSelectedMonth(newKey);
   };
 
-  const displayMonthName = useMemo(() => {
-    const [y, m] = selectedMonth.split('-');
-    return new Date(parseInt(y), parseInt(m) - 1).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
-  }, [selectedMonth]);
-
   return (
     <div className="min-h-screen bg-slate-900 text-slate-200 pb-24">
       {/* AppBar */}
@@ -161,10 +197,15 @@ const App: React.FC = () => {
           <h1 className="text-lg font-black tracking-tight text-white uppercase">Aniq<span className="text-indigo-400">Finance</span></h1>
         </div>
         
-        <div className="flex items-center bg-slate-800 rounded-full px-2 py-1 border border-slate-700">
-          <button onClick={() => navigateMonth(-1)} className="p-1.5 text-slate-400"><ChevronLeft size={18} /></button>
-          <span className="text-xs font-bold px-2 text-slate-200">{displayMonthName}</span>
-          <button onClick={() => navigateMonth(1)} className="p-1.5 text-slate-400"><ChevronRight size={18} /></button>
+        <div className="flex items-center">
+          <div className="flex items-center bg-slate-800 rounded-full px-2 py-1 border border-slate-700">
+            <button onClick={() => navigateMonth(-1)} className="p-1.5 text-slate-400"><ChevronLeft size={18} /></button>
+            <span className="text-xs font-bold px-2 text-slate-200">{displayMonthName}</span>
+            <button onClick={() => navigateMonth(1)} className="p-1.5 text-slate-400"><ChevronRight size={18} /></button>
+          </div>
+          <button onClick={handleLogout} title="Keluar" className="ml-2 p-2 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-full transition-colors">
+            <LogOut size={18} />
+          </button>
         </div>
       </header>
 
@@ -179,9 +220,10 @@ const App: React.FC = () => {
               <div className="flex items-center gap-2 mt-1">
                 <span className="text-slate-500 font-bold">Rp</span>
                 <input 
-                  type="number"
-                  value={currentData.income}
-                  onChange={(e) => updateCurrentMonthData({ income: Number(e.target.value) })}
+                  type="text"
+                  inputMode="numeric"
+                  value={formatInput(currentData.income)}
+                  onChange={(e) => updateCurrentMonthData({ income: parseInput(e.target.value) })}
                   className="text-2xl font-black text-white bg-transparent border-none outline-none w-full"
                 />
               </div>
