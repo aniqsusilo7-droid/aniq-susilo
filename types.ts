@@ -1,10 +1,9 @@
 
-// Fix: Defined CategoryType enum to provide missing export needed by constants.ts
 export enum CategoryType {
   FIXED_EXPENSE = 'Kebutuhan Pokok',
   DEBT = 'Cicilan / Hutang',
   SAVINGS = 'Tabungan / Investasi',
-  UNEXPECTED = 'Lain-lain (Tak Terduga)'
+  UNEXPECTED = 'Kebutuhan Lain-lain'
 }
 
 export const DEFAULT_CATEGORIES = [
@@ -22,9 +21,30 @@ export interface FinanceItem {
   actual: number;
 }
 
+export interface InvestmentDetails {
+  educationFund: number;
+  retirementFund: number;
+  generalSavings: number;
+  educationTarget: number;
+  retirementTarget: number;
+  savingsTarget: number;
+}
+
+export interface SalaryDetails {
+  basicSalary: number;
+  shiftAllowance: number;
+  housingAllowance: number;
+  otHoursStr: string;
+  taxRateStr: string;
+  otherDeductions: number;
+  bonusMultiplierStr: string;
+}
+
 export interface MonthlyBudget {
   income: number;
   items: FinanceItem[];
   categories: string[];
   year: string;
+  salarySlip?: SalaryDetails;
+  investments?: InvestmentDetails;
 }

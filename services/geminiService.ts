@@ -3,7 +3,7 @@ import { GoogleGenAI } from "@google/genai";
 import { MonthlyBudget } from "../types";
 
 export const analyzeFinance = async (budget: MonthlyBudget): Promise<string> => {
-  // Fix: Initialize GoogleGenAI with named parameter as per guidelines
+  // Fix: Initialized GoogleGenAI using the correct named parameter.
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const totalActual = budget.items.reduce((sum, item) => sum + item.actual, 0);
@@ -29,14 +29,14 @@ export const analyzeFinance = async (budget: MonthlyBudget): Promise<string> => 
   `;
 
   try {
-    // Fix: Using gemini-3-pro-preview for complex reasoning/analysis tasks
-    // Fix: Using explicit parts structure for clarity
+    // Fix: Used 'gemini-3-pro-preview' for complex reasoning/analysis as per model selection rules.
+    // Fix: Used the simplified string format for the contents parameter.
     const response = await ai.models.generateContent({
       model: 'gemini-3-pro-preview',
-      contents: [{ parts: [{ text: prompt }] }],
+      contents: prompt,
     });
     
-    // Fix: Solely use the .text property (not a method) as per guidelines
+    // Fix: Accessed the .text property directly (not a method call).
     return response.text || "Maaf, AI asisten sedang tidak dapat memberikan analisis.";
   } catch (error) {
     console.error("AI Analysis error:", error);

@@ -3,12 +3,13 @@ import React, { useState } from 'react';
 import { ShieldCheck, User, Lock, ArrowRight, AlertCircle } from 'lucide-react';
 
 interface LoginProps {
-  onLoginSuccess: () => void;
+  onLoginSuccess: (remember: boolean) => void;
 }
 
 const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
@@ -20,7 +21,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
     // Simulasi delay untuk efek loading
     setTimeout(() => {
       if (username === 'aniqsusilo' && password === '210118081996') {
-        onLoginSuccess();
+        onLoginSuccess(rememberMe);
       } else {
         setError('Username atau password tidak valid.');
       }
@@ -70,6 +71,18 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
               />
             </div>
             
+            <div className="flex items-center">
+              <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="appearance-none w-5 h-5 rounded-md bg-slate-950/50 border border-slate-800 checked:bg-indigo-600 checked:border-indigo-500 transition-all duration-200"
+                />
+                <span className="text-xs font-bold text-slate-400">Ingat Saya</span>
+              </label>
+            </div>
+
             {error && (
               <div className="flex items-center gap-2.5 p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-xs font-bold text-rose-400 animate-in fade-in duration-300">
                 <AlertCircle size={16} />

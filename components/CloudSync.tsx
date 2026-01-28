@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Cloud, 
   CloudUpload, 
@@ -16,12 +16,51 @@ import {
   CircleCheck,
   Globe,
   Lock,
-  LogOut
+  LogOut,
+  RefreshCw,
+  Settings,
+  Save
 } from 'lucide-react';
+
+// --- KONFIGURASI GOOGLE DRIVE ---
+// Menggunakan safe access untuk menghindari error runtime
+const getEnv = (key: string) => {
+  try {
+    // @ts-ignore
+    return (import.meta && import.meta.env) ? import.meta.env[key] : '';
+  } catch (e) {
+    return '';
+  }
+};
+
+// Helper untuk mendapatkan API Key dari berbagai sumber yang mungkin
+const getEnvApiKey = () => {
+    const viteKey = getEnv('VITE_GOOGLE_API_KEY') || getEnv('VITE_API_KEY');
+    if (viteKey) return viteKey;
+    try {
+        return process.env.API_KEY || '';
+    } catch {
+        return '';
+    }
+};
+
+// Scope 'drive.file' memastikan aplikasi hanya bisa mengakses/edit file yang dibuat oleh aplikasi ini (Aman)
+const SCOPES = 'https://www.googleapis.com/auth/drive.file';
+const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
+const TARGET_EMAIL = 'aniqsusilo7@gmail.com';
+const BACKUP_FILE_NAME = 'aniq_finance_backup.json';
 
 interface CloudSyncProps {
   data: any;
   onDataLoaded: (newData: any) => void;
+}
+
+// Global types declaration for Google API
+declare global {
+  interface Window {
+    gapi: any;
+    google: any;
+  }
 }
 
 const CloudSync: React.FC<CloudSyncProps> = ({ data, onDataLoaded }) => {
@@ -32,10 +71,118 @@ const CloudSync: React.FC<CloudSyncProps> = ({ data, onDataLoaded }) => {
   const [inputSyncId, setInputSyncId] = useState('');
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
   
   // Google Drive states
+  const [gapiInited, setGapiInited] = useState(false);
+  const [gisInited, setGisInited] = useState(false);
+  const [tokenClient, setTokenClient] = useState<any>(null);
   const [isDriveConnected, setIsDriveConnected] = useState(false);
   const [lastDriveSync, setLastDriveSync] = useState<string | null>(null);
+  
+  // Configuration State
+  const [clientId, setClientId] = useState<string>('');
+  const [apiKey, setApiKey] = useState<string>('');
+  const [showConfig, setShowConfig] = useState(false);
+
+  // Initialize Config from Env or LocalStorage
+  useEffect(() => {
+    const envClientId = getEnv('VITE_GOOGLE_CLIENT_ID') || getEnv('VITE_CLIENT_ID');
+    const envApiKey = getEnvApiKey();
+    
+    const localClientId = localStorage.getItem('custom_client_id');
+    const localApiKey = localStorage.getItem('custom_api_key');
+
+    const finalClientId = envClientId || localClientId || '';
+    const finalApiKey = envApiKey || localApiKey || '';
+
+    setClientId(finalClientId);
+    setApiKey(finalApiKey);
+
+    // If no keys are found anywhere, show config form by default
+    if (!finalClientId || !finalApiKey) {
+      setShowConfig(true);
+    }
+  }, []);
+
+  // Load Google Scripts Dynamically
+  useEffect(() => {
+    const loadScripts = () => {
+      const scriptGapi = document.createElement('script');
+      scriptGapi.src = 'https://apis.google.com/js/api.js';
+      scriptGapi.async = true;
+      scriptGapi.defer = true;
+      scriptGapi.onload = () => {
+        // Only init if we have keys
+        if (apiKey && clientId) {
+           initializeGapiClient();
+        }
+      };
+      document.body.appendChild(scriptGapi);
+
+      const scriptGis = document.createElement('script');
+      scriptGis.src = 'https://accounts.google.com/gsi/client';
+      scriptGis.async = true;
+      scriptGis.defer = true;
+      scriptGis.onload = () => {
+        setGisInited(true);
+        if (window.google && clientId) {
+           const client = window.google.accounts.oauth2.initTokenClient({
+            client_id: clientId,
+            scope: SCOPES,
+            callback: '', 
+            login_hint: TARGET_EMAIL 
+          });
+          setTokenClient(client);
+        }
+      };
+      document.body.appendChild(scriptGis);
+    };
+
+    if (isOpen && !gapiInited && clientId && apiKey) {
+      loadScripts();
+    }
+  }, [isOpen, gapiInited, clientId, apiKey]);
+
+  const initializeGapiClient = async () => {
+    if (!apiKey || !clientId) return;
+
+    try {
+      await new Promise<void>((resolve) => {
+        window.gapi.load('client', resolve);
+      });
+
+      await window.gapi.client.init({
+        apiKey: apiKey,
+        discoveryDocs: [DISCOVERY_DOC],
+      });
+      
+      setGapiInited(true);
+      
+      const savedToken = localStorage.getItem('gdrive_access_token');
+      if (savedToken) {
+         window.gapi.client.setToken({ access_token: savedToken });
+         setIsDriveConnected(true);
+      }
+    } catch (err) {
+      console.error("GAPI Init Error", err);
+      const errorMessage = err instanceof Error ? err.message : JSON.stringify(err);
+      if (!errorMessage.includes('missing required fields')) {
+         setError(`Gagal memuat library Google: ${errorMessage}`);
+      }
+    }
+  };
+
+  const handleSaveConfig = (newClientId: string, newApiKey: string) => {
+    localStorage.setItem('custom_client_id', newClientId);
+    localStorage.setItem('custom_api_key', newApiKey);
+    setClientId(newClientId);
+    setApiKey(newApiKey);
+    setShowConfig(false);
+    setError(null);
+    // Reload page to ensure scripts re-init cleanly or just re-run effect
+    window.location.reload();
+  };
 
   // Handle Close with ESC key
   useEffect(() => {
@@ -46,6 +193,142 @@ const CloudSync: React.FC<CloudSyncProps> = ({ data, onDataLoaded }) => {
     return () => window.removeEventListener('keydown', handleEsc);
   }, []);
 
+  // --- GOOGLE DRIVE LOGIC ---
+
+  const handleAuthClick = () => {
+    setError(null);
+    if (!tokenClient) {
+      setError("Inisialisasi Gagal. Silakan refresh halaman atau periksa konfigurasi.");
+      return;
+    }
+
+    tokenClient.callback = async (resp: any) => {
+      if (resp.error !== undefined) {
+        throw (resp);
+      }
+      setIsDriveConnected(true);
+      localStorage.setItem('gdrive_access_token', resp.access_token);
+      await syncToDrive(); 
+    };
+
+    if (window.gapi.client.getToken() === null) {
+      tokenClient.requestAccessToken({prompt: 'consent'});
+    } else {
+      tokenClient.requestAccessToken({prompt: ''});
+    }
+  };
+
+  const syncToDrive = async () => {
+    setLoading(true);
+    setError(null);
+    setSuccessMsg(null);
+    try {
+      const response = await window.gapi.client.drive.files.list({
+        'pageSize': 1,
+        'fields': "files(id, name)",
+        'q': `name = '${BACKUP_FILE_NAME}' and trashed = false`
+      });
+
+      const files = response.result.files;
+      const fileContent = JSON.stringify(data, null, 2);
+      
+      const fileMetadata = {
+        'name': BACKUP_FILE_NAME,
+        'mimeType': 'application/json'
+      };
+
+      if (files && files.length > 0) {
+        const fileId = files[0].id;
+        await updateFile(fileId, fileContent);
+        setSuccessMsg("Backup diperbarui di Google Drive!");
+      } else {
+        await createFile(fileMetadata, fileContent);
+        setSuccessMsg("File backup baru dibuat di Google Drive!");
+      }
+      setLastDriveSync(new Date().toLocaleString('id-ID'));
+    } catch (err: any) {
+      console.error(err);
+      if (err.status === 401 || (err.result && err.result.error && err.result.error.code === 401)) {
+         setError("Sesi kadaluarsa. Silakan Hubungkan Drive kembali.");
+         setIsDriveConnected(false);
+         localStorage.removeItem('gdrive_access_token');
+      } else {
+         setError("Gagal menyimpan ke Drive. Periksa koneksi atau API Key.");
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadFromDrive = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+       const response = await window.gapi.client.drive.files.list({
+        'pageSize': 1,
+        'fields': "files(id, name)",
+        'q': `name = '${BACKUP_FILE_NAME}' and trashed = false`
+      });
+      const files = response.result.files;
+      
+      if (files && files.length > 0) {
+        const fileId = files[0].id;
+        const result = await window.gapi.client.drive.files.get({
+          fileId: fileId,
+          alt: 'media'
+        });
+        
+        const parsedData = JSON.parse(result.body);
+        if (confirm(`Ditemukan backup dari Drive. Timpa data lokal?`)) {
+           onDataLoaded(parsedData);
+           setSuccessMsg("Data berhasil dipulihkan dari Drive!");
+        }
+      } else {
+        setError("File backup tidak ditemukan di Drive akun ini.");
+      }
+    } catch (err) {
+      console.error(err);
+      setError("Gagal memuat dari Drive.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateFile = async (fileId: string, content: string) => {
+    return window.gapi.client.request({
+      path: `/upload/drive/v3/files/${fileId}`,
+      method: 'PATCH',
+      params: { uploadType: 'media' },
+      body: content
+    });
+  };
+
+  const createFile = async (metadata: any, content: string) => {
+    const boundary = '-------314159265358979323846';
+    const delimiter = "\r\n--" + boundary + "\r\n";
+    const close_delim = "\r\n--" + boundary + "--";
+
+    const multipartRequestBody =
+        delimiter +
+        'Content-Type: application/json\r\n\r\n' +
+        JSON.stringify(metadata) +
+        delimiter +
+        'Content-Type: application/json\r\n\r\n' +
+        content +
+        close_delim;
+
+    return window.gapi.client.request({
+      path: '/upload/drive/v3/files',
+      method: 'POST',
+      params: { uploadType: 'multipart' },
+      headers: {
+        'Content-Type': 'multipart/related; boundary="' + boundary + '"'
+      },
+      body: multipartRequestBody
+    });
+  };
+
+  // --- NPOINT (OLD) LOGIC ---
   const saveToCloud = async () => {
     setLoading(true);
     setError(null);
@@ -102,24 +385,7 @@ const CloudSync: React.FC<CloudSyncProps> = ({ data, onDataLoaded }) => {
     });
   };
 
-  const connectGoogleDrive = () => {
-    setLoading(true);
-    setTimeout(() => {
-      setIsDriveConnected(true);
-      setLoading(false);
-      localStorage.setItem('drive_connected', 'true');
-    }, 1500);
-  };
-
-  const syncToDrive = () => {
-    setLoading(true);
-    setTimeout(() => {
-      setLastDriveSync(new Date().toLocaleString('id-ID'));
-      setLoading(false);
-      alert('Berhasil! Data Anda sekarang aman di Google Drive (Folder Keuangan).');
-    }, 2000);
-  };
-
+  // --- LOCAL FILE LOGIC ---
   const exportToFile = () => {
     const dataStr = JSON.stringify(data, null, 2);
     const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
@@ -149,6 +415,62 @@ const CloudSync: React.FC<CloudSyncProps> = ({ data, onDataLoaded }) => {
       }
     };
     reader.readAsText(file);
+  };
+
+  // Sub-component for Manual Config Form
+  const ConfigForm = () => {
+    const [tempClientId, setTempClientId] = useState(clientId);
+    const [tempApiKey, setTempApiKey] = useState(apiKey);
+
+    return (
+      <div className="space-y-4 w-full max-w-sm mx-auto animate-in fade-in zoom-in-95">
+         <div className="text-center mb-4">
+            <h4 className="text-white font-black text-sm uppercase tracking-widest">Konfigurasi API</h4>
+            <p className="text-[10px] text-slate-500 mt-1">Masukkan Google Drive credentials Anda</p>
+         </div>
+         
+         <div className="space-y-3">
+            <div>
+              <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block">Client ID</label>
+              <input 
+                 type="text" 
+                 value={tempClientId}
+                 onChange={(e) => setTempClientId(e.target.value)}
+                 className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:border-indigo-500 outline-none"
+                 placeholder="xxx.apps.googleusercontent.com"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block">API Key</label>
+              <input 
+                 type="text" 
+                 value={tempApiKey}
+                 onChange={(e) => setTempApiKey(e.target.value)}
+                 className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:border-indigo-500 outline-none"
+                 placeholder="AIzaSy..."
+              />
+            </div>
+         </div>
+
+         <div className="flex gap-2 pt-2">
+            {/* Show Cancel only if we already have some keys and just editing */}
+            {(clientId && apiKey) && (
+              <button 
+                onClick={() => setShowConfig(false)}
+                className="flex-1 py-2.5 bg-slate-800 text-slate-400 font-bold text-xs rounded-xl hover:bg-slate-700"
+              >
+                Batal
+              </button>
+            )}
+            <button 
+              onClick={() => handleSaveConfig(tempClientId, tempApiKey)}
+              className="flex-1 py-2.5 bg-indigo-600 text-white font-bold text-xs rounded-xl hover:bg-indigo-500 flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/20"
+            >
+              <Save size={14} /> Simpan
+            </button>
+         </div>
+      </div>
+    );
   };
 
   return (
@@ -182,7 +504,7 @@ const CloudSync: React.FC<CloudSyncProps> = ({ data, onDataLoaded }) => {
                 </div>
                 <div>
                   <h3 className="font-black text-white text-xl tracking-tight leading-none">Pusat Data Abadi</h3>
-                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-[0.2em] mt-2">Keuangan - Aniq Susilo</p>
+                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-[0.2em] mt-2">Target: {TARGET_EMAIL}</p>
                 </div>
               </div>
               <button 
@@ -220,43 +542,66 @@ const CloudSync: React.FC<CloudSyncProps> = ({ data, onDataLoaded }) => {
               
               {/* Google Drive Tab */}
               {activeTab === 'drive' && (
-                <div className="space-y-8 animate-in slide-in-from-right-4 duration-500 text-center flex flex-col items-center">
+                <div className="space-y-8 animate-in slide-in-from-right-4 duration-500 text-center flex flex-col items-center w-full">
                   <div className="w-20 h-20 bg-slate-900 rounded-[24px] flex items-center justify-center border border-slate-800 shadow-inner">
                     <img src="https://upload.wikimedia.org/wikipedia/commons/1/12/Google_Drive_icon_%282020%29.svg" className="w-10 h-10" alt="Drive" />
                   </div>
                   
-                  <div className="space-y-3 max-w-sm">
-                    <h4 className="text-xl font-black text-white tracking-tight">Penyimpanan Google Drive</h4>
-                    <p className="text-sm text-slate-500 leading-relaxed font-medium">
-                      Simpan data keuangan Anda secara aman di akun Google pribadi. Data tersimpan selamanya selama akun Anda aktif.
-                    </p>
+                  <div className="space-y-3 max-w-sm w-full">
+                    {/* Header Text or Settings Toggle */}
+                    <div className="flex justify-center items-center gap-2 relative">
+                       <h4 className="text-xl font-black text-white tracking-tight">Akun: {TARGET_EMAIL}</h4>
+                       {!showConfig && (
+                         <button onClick={() => setShowConfig(true)} className="p-1.5 text-slate-600 hover:text-indigo-400 rounded-lg hover:bg-slate-800/50 transition-colors absolute -right-8" title="Edit Konfigurasi">
+                           <Settings size={14} />
+                         </button>
+                       )}
+                    </div>
+                    
+                    {!showConfig && (
+                      <p className="text-sm text-slate-500 leading-relaxed font-medium">
+                        Hubungkan akun Google Anda untuk menyimpan data otomatis.
+                      </p>
+                    )}
                   </div>
 
-                  {!isDriveConnected ? (
-                    <button 
-                      onClick={connectGoogleDrive}
-                      disabled={loading}
-                      className="w-full max-w-xs py-4.5 bg-white text-black font-black text-xs uppercase tracking-[0.2em] rounded-2xl hover:bg-indigo-400 hover:text-white transition-all shadow-xl flex items-center justify-center gap-3 active:scale-95 disabled:opacity-50"
-                    >
-                      {loading ? <Loader2 className="animate-spin" size={20} /> : <Globe size={20} />}
-                      Hubungkan Drive
-                    </button>
+                  {showConfig ? (
+                    <ConfigForm />
                   ) : (
-                    <div className="w-full space-y-4">
-                      <div className="p-6 bg-emerald-500/10 border border-emerald-500/20 rounded-[28px] flex items-center justify-between ring-1 ring-emerald-500/5">
-                        <div className="flex items-center gap-4 text-left">
-                          <div className="p-2 bg-emerald-500 text-white rounded-lg"><CircleCheck size={18} /></div>
-                          <div>
-                            <p className="text-[10px] text-emerald-500 font-black uppercase tracking-widest">Status: Terhubung</p>
-                            <p className="text-xs text-white font-bold mt-0.5">Sinkron Terakhir: {lastDriveSync || 'Belum pernah'}</p>
-                          </div>
-                        </div>
-                        <button onClick={syncToDrive} disabled={loading} className="px-5 py-2.5 bg-emerald-500 text-white text-[10px] font-black rounded-xl hover:bg-emerald-400 transition-all">
-                          {loading ? 'SINKRON...' : 'SINKRON SEKARANG'}
+                    <>
+                      {!isDriveConnected ? (
+                        <button 
+                          onClick={handleAuthClick}
+                          disabled={loading || !gapiInited}
+                          className="w-full max-w-xs py-4.5 bg-white text-black font-black text-xs uppercase tracking-[0.2em] rounded-2xl hover:bg-indigo-400 hover:text-white transition-all shadow-xl flex items-center justify-center gap-3 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed mt-4"
+                        >
+                          {loading ? <Loader2 className="animate-spin" size={20} /> : <Globe size={20} />}
+                          {gapiInited ? 'HUBUNGKAN DRIVE' : 'MEMUAT GOOGLE...'}
                         </button>
-                      </div>
-                      <p className="text-[10px] text-slate-600 font-bold uppercase tracking-widest">Aman • Privat • Selamanya</p>
-                    </div>
+                      ) : (
+                        <div className="w-full space-y-4 mt-4">
+                          <div className="p-6 bg-emerald-500/10 border border-emerald-500/20 rounded-[28px] flex items-center justify-between ring-1 ring-emerald-500/5">
+                            <div className="flex items-center gap-4 text-left">
+                              <div className="p-2 bg-emerald-500 text-white rounded-lg"><CircleCheck size={18} /></div>
+                              <div>
+                                <p className="text-[10px] text-emerald-500 font-black uppercase tracking-widest">Status: Terhubung</p>
+                                <p className="text-xs text-white font-bold mt-0.5">Sinkron Terakhir: {lastDriveSync || 'Belum pernah'}</p>
+                              </div>
+                            </div>
+                            <div className="flex gap-2">
+                              <button onClick={loadFromDrive} disabled={loading} title="Ambil dari Drive" className="px-3 py-2 bg-slate-800 text-slate-300 rounded-xl hover:bg-slate-700 transition-all">
+                                  <CloudDownload size={16} />
+                              </button>
+                              <button onClick={syncToDrive} disabled={loading} className="px-5 py-2.5 bg-emerald-500 text-white text-[10px] font-black rounded-xl hover:bg-emerald-400 transition-all flex items-center gap-2">
+                                {loading ? <Loader2 className="animate-spin" size={12} /> : <RefreshCw size={12} />}
+                                {loading ? 'SYNC...' : 'SIMPAN'}
+                              </button>
+                            </div>
+                          </div>
+                          <p className="text-[10px] text-slate-600 font-bold uppercase tracking-widest">File: {BACKUP_FILE_NAME}</p>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               )}
@@ -352,6 +697,13 @@ const CloudSync: React.FC<CloudSyncProps> = ({ data, onDataLoaded }) => {
                   {error}
                 </div>
               )}
+              
+              {successMsg && (
+                <div className="mt-6 flex items-center gap-3 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-emerald-400 text-xs font-bold animate-in zoom-in">
+                  <Check size={16} />
+                  {successMsg}
+                </div>
+              )}
             </div>
 
             {/* Footer Actions */}
@@ -368,7 +720,7 @@ const CloudSync: React.FC<CloudSyncProps> = ({ data, onDataLoaded }) => {
                   <Lock size={12} /> Data Vault Secure
                 </div>
                 <p className="text-[10px] text-slate-700 font-medium italic">
-                  Aniq Susilo Finance System v2.2
+                  Aniq Susilo Finance System v2.3
                 </p>
               </div>
             </div>
