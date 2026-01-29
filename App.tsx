@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { INITIAL_ITEMS } from './constants';
 import { DEFAULT_CATEGORIES, FinanceItem, MonthlyBudget, CategoryType, SalaryDetails, InvestmentDetails } from './types';
 import SummaryCards from './components/SummaryCards';
@@ -11,7 +11,6 @@ import PWAInstaller from './components/PWAInstaller';
 import Login from './components/Login'; 
 import SalarySlip from './components/SalarySlip';
 import InvestmentView from './components/InvestmentView';
-import CloudSync from './components/CloudSync';
 import AIAssistant from './components/AIAssistant';
 import { 
   Plus, 
@@ -25,8 +24,7 @@ import {
   Calculator,
   Copy,
   History,
-  TrendingUp,
-  Cloud
+  TrendingUp
 } from 'lucide-react';
 
 const NewCategoryForm: React.FC<{
@@ -83,8 +81,6 @@ const DEFAULT_INVESTMENT_DETAILS: InvestmentDetails = {
 
 const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
-  const cloudSyncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   const getCurrentMonthKey = () => {
     const d = new Date();
@@ -120,44 +116,9 @@ const App: React.FC = () => {
   const formatInput = (num: number) => num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
   const parseInput = (str: string) => Number(str.replace(/[^0-9]/g, ''));
 
-  // Logika Auto-Sync Cloud
+  // Simpan data ke Local Storage (Penyimpanan Lokal HP)
   useEffect(() => {
-    const cloudId = localStorage.getItem('arthaku_cloud_id');
-    
-    // Simpan ke Local Storage
     localStorage.setItem('arthaku_master_data', JSON.stringify(allMonthsData));
-
-    // Jika Cloud ID aktif, lakukan auto-sync ke online
-    if (cloudId && Object.keys(allMonthsData).length > 0) {
-      if (cloudSyncTimeoutRef.current) clearTimeout(cloudSyncTimeoutRef.current);
-      
-      setSyncStatus('syncing');
-      cloudSyncTimeoutRef.current = setTimeout(async () => {
-        try {
-          const response = await fetch(`https://api.npoint.io/bins/${cloudId}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              payload: btoa(JSON.stringify(allMonthsData)), 
-              timestamp: new Date().toISOString(),
-              app: "AniqFinance_Pro"
-            }),
-          });
-          if (response.ok) {
-            setSyncStatus('success');
-            setTimeout(() => setSyncStatus('idle'), 3000);
-          } else {
-            setSyncStatus('error');
-          }
-        } catch (e) {
-          setSyncStatus('error');
-        }
-      }, 2000);
-    }
-
-    return () => {
-      if (cloudSyncTimeoutRef.current) clearTimeout(cloudSyncTimeoutRef.current);
-    };
   }, [allMonthsData]);
 
   useEffect(() => {
@@ -217,12 +178,6 @@ const App: React.FC = () => {
     return prevMonths[0] || null;
   };
   
-  const handleDataLoadedFromCloud = (newData: Record<string, MonthlyBudget>) => {
-    if (newData && Object.keys(newData).length > 0) {
-      setAllMonthsData(newData);
-    }
-  };
-
   const updateCurrentMonthData = (newData: Partial<MonthlyBudget>) => {
     setAllMonthsData(prev => {
       const current = prev[selectedMonth];
@@ -309,21 +264,12 @@ const App: React.FC = () => {
           <div className="flex flex-col leading-none">
              <div className="flex items-center gap-1.5">
                <h1 className="text-sm font-black tracking-tight text-white uppercase">ANIQ SUSILO</h1>
-               {syncStatus === 'syncing' && <Cloud size={10} className="text-indigo-400 animate-pulse" />}
-               {syncStatus === 'success' && <Cloud size={10} className="text-emerald-400" />}
-               {syncStatus === 'error' && <Cloud size={10} className="text-rose-400" />}
              </div>
              <span className="text-[9px] font-bold text-indigo-400 tracking-[0.2em] mt-0.5">(FINANCE)</span>
           </div>
         </div>
         
         <div className="flex items-center gap-4">
-          <CloudSync 
-            data={allMonthsData} 
-            onDataLoaded={handleDataLoadedFromCloud} 
-            syncStatus={syncStatus}
-            setSyncStatus={setSyncStatus}
-          />
           <div className="flex items-center bg-slate-800 rounded-full px-2 py-1 border border-slate-700">
             <button onClick={() => navigateMonth(-1)} className="p-1.5 text-slate-400"><ChevronLeft size={18} /></button>
             <span className="text-xs font-bold px-2 text-slate-200">{displayMonthName}</span>
