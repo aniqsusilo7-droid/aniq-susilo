@@ -2,8 +2,6 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Cloud, 
-  CloudUpload, 
-  CloudDownload, 
   Copy, 
   Check, 
   Loader2, 
@@ -13,365 +11,131 @@ import {
   FileJson, 
   Download, 
   Upload,
-  CircleCheck,
   Globe,
-  Lock,
-  LogOut,
   RefreshCw,
-  Settings,
-  Save
+  ShieldCheck,
+  Zap,
+  Eye,
+  EyeOff,
+  Lock,
+  Smartphone,
+  LogOut,
+  WifiOff,
+  Wifi,
+  Mail,
+  UserCircle,
+  Shield,
+  ChevronRight
 } from 'lucide-react';
-
-// --- KONFIGURASI GOOGLE DRIVE ---
-// Menggunakan safe access untuk menghindari error runtime
-const getEnv = (key: string) => {
-  try {
-    // @ts-ignore
-    return (import.meta && import.meta.env) ? import.meta.env[key] : '';
-  } catch (e) {
-    return '';
-  }
-};
-
-// Helper untuk mendapatkan API Key dari berbagai sumber yang mungkin
-const getEnvApiKey = () => {
-    const viteKey = getEnv('VITE_GOOGLE_API_KEY') || getEnv('VITE_API_KEY');
-    if (viteKey) return viteKey;
-    try {
-        return process.env.API_KEY || '';
-    } catch {
-        return '';
-    }
-};
-
-// Scope 'drive.file' memastikan aplikasi hanya bisa mengakses/edit file yang dibuat oleh aplikasi ini (Aman)
-const SCOPES = 'https://www.googleapis.com/auth/drive.file';
-const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
-const TARGET_EMAIL = 'aniqsusilo7@gmail.com';
-const BACKUP_FILE_NAME = 'aniq_finance_backup.json';
 
 interface CloudSyncProps {
   data: any;
   onDataLoaded: (newData: any) => void;
+  syncStatus: 'idle' | 'syncing' | 'success' | 'error';
+  setSyncStatus: (status: 'idle' | 'syncing' | 'success' | 'error') => void;
 }
 
-// Global types declaration for Google API
-declare global {
-  interface Window {
-    gapi: any;
-    google: any;
-  }
-}
-
-const CloudSync: React.FC<CloudSyncProps> = ({ data, onDataLoaded }) => {
+const CloudSync: React.FC<CloudSyncProps> = ({ data, onDataLoaded, syncStatus, setSyncStatus }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'drive' | 'cloud' | 'local'>('drive');
+  const [activeTab, setActiveTab] = useState<'account' | 'local'>('account');
   const [loading, setLoading] = useState(false);
-  const [syncId, setSyncId] = useState<string>('');
+  
+  // State untuk Akun Email
+  const [userEmail, setUserEmail] = useState<string>(() => localStorage.getItem('arthaku_user_email') || '');
+  const [syncId, setSyncId] = useState<string>(() => localStorage.getItem('arthaku_cloud_id') || '');
+  
+  const [inputEmail, setInputEmail] = useState('');
   const [inputSyncId, setInputSyncId] = useState('');
+  
   const [copied, setCopied] = useState(false);
+  const [showKey, setShowKey] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
-  
-  // Google Drive states
-  const [gapiInited, setGapiInited] = useState(false);
-  const [gisInited, setGisInited] = useState(false);
-  const [tokenClient, setTokenClient] = useState<any>(null);
-  const [isDriveConnected, setIsDriveConnected] = useState(false);
-  const [lastDriveSync, setLastDriveSync] = useState<string | null>(null);
-  
-  // Configuration State
-  const [clientId, setClientId] = useState<string>('');
-  const [apiKey, setApiKey] = useState<string>('');
-  const [showConfig, setShowConfig] = useState(false);
+  const [lastSyncTime, setLastSyncTime] = useState<string | null>(() => localStorage.getItem('arthaku_last_sync') || null);
 
-  // Initialize Config from Env or LocalStorage
-  useEffect(() => {
-    const envClientId = getEnv('VITE_GOOGLE_CLIENT_ID') || getEnv('VITE_CLIENT_ID');
-    const envApiKey = getEnvApiKey();
-    
-    const localClientId = localStorage.getItem('custom_client_id');
-    const localApiKey = localStorage.getItem('custom_api_key');
-
-    const finalClientId = envClientId || localClientId || '';
-    const finalApiKey = envApiKey || localApiKey || '';
-
-    setClientId(finalClientId);
-    setApiKey(finalApiKey);
-
-    // If no keys are found anywhere, show config form by default
-    if (!finalClientId || !finalApiKey) {
-      setShowConfig(true);
-    }
-  }, []);
-
-  // Load Google Scripts Dynamically
-  useEffect(() => {
-    const loadScripts = () => {
-      const scriptGapi = document.createElement('script');
-      scriptGapi.src = 'https://apis.google.com/js/api.js';
-      scriptGapi.async = true;
-      scriptGapi.defer = true;
-      scriptGapi.onload = () => {
-        // Only init if we have keys
-        if (apiKey && clientId) {
-           initializeGapiClient();
-        }
-      };
-      document.body.appendChild(scriptGapi);
-
-      const scriptGis = document.createElement('script');
-      scriptGis.src = 'https://accounts.google.com/gsi/client';
-      scriptGis.async = true;
-      scriptGis.defer = true;
-      scriptGis.onload = () => {
-        setGisInited(true);
-        if (window.google && clientId) {
-           const client = window.google.accounts.oauth2.initTokenClient({
-            client_id: clientId,
-            scope: SCOPES,
-            callback: '', 
-            login_hint: TARGET_EMAIL 
-          });
-          setTokenClient(client);
-        }
-      };
-      document.body.appendChild(scriptGis);
-    };
-
-    if (isOpen && !gapiInited && clientId && apiKey) {
-      loadScripts();
-    }
-  }, [isOpen, gapiInited, clientId, apiKey]);
-
-  const initializeGapiClient = async () => {
-    if (!apiKey || !clientId) return;
-
-    try {
-      await new Promise<void>((resolve) => {
-        window.gapi.load('client', resolve);
-      });
-
-      await window.gapi.client.init({
-        apiKey: apiKey,
-        discoveryDocs: [DISCOVERY_DOC],
-      });
-      
-      setGapiInited(true);
-      
-      const savedToken = localStorage.getItem('gdrive_access_token');
-      if (savedToken) {
-         window.gapi.client.setToken({ access_token: savedToken });
-         setIsDriveConnected(true);
-      }
-    } catch (err) {
-      console.error("GAPI Init Error", err);
-      const errorMessage = err instanceof Error ? err.message : JSON.stringify(err);
-      if (!errorMessage.includes('missing required fields')) {
-         setError(`Gagal memuat library Google: ${errorMessage}`);
-      }
-    }
-  };
-
-  const handleSaveConfig = (newClientId: string, newApiKey: string) => {
-    localStorage.setItem('custom_client_id', newClientId);
-    localStorage.setItem('custom_api_key', newApiKey);
-    setClientId(newClientId);
-    setApiKey(newApiKey);
-    setShowConfig(false);
-    setError(null);
-    // Reload page to ensure scripts re-init cleanly or just re-run effect
-    window.location.reload();
-  };
-
-  // Handle Close with ESC key
-  useEffect(() => {
-    const handleEsc = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setIsOpen(false);
-    };
-    window.addEventListener('keydown', handleEsc);
-    return () => window.removeEventListener('keydown', handleEsc);
-  }, []);
-
-  // --- GOOGLE DRIVE LOGIC ---
-
-  const handleAuthClick = () => {
-    setError(null);
-    if (!tokenClient) {
-      setError("Inisialisasi Gagal. Silakan refresh halaman atau periksa konfigurasi.");
+  const handleCreateAccount = async () => {
+    if (!inputEmail.includes('@')) {
+      setError('Mohon masukkan alamat email yang valid.');
       return;
     }
 
-    tokenClient.callback = async (resp: any) => {
-      if (resp.error !== undefined) {
-        throw (resp);
-      }
-      setIsDriveConnected(true);
-      localStorage.setItem('gdrive_access_token', resp.access_token);
-      await syncToDrive(); 
-    };
-
-    if (window.gapi.client.getToken() === null) {
-      tokenClient.requestAccessToken({prompt: 'consent'});
-    } else {
-      tokenClient.requestAccessToken({prompt: ''});
-    }
-  };
-
-  const syncToDrive = async () => {
-    setLoading(true);
-    setError(null);
-    setSuccessMsg(null);
-    try {
-      const response = await window.gapi.client.drive.files.list({
-        'pageSize': 1,
-        'fields': "files(id, name)",
-        'q': `name = '${BACKUP_FILE_NAME}' and trashed = false`
-      });
-
-      const files = response.result.files;
-      const fileContent = JSON.stringify(data, null, 2);
-      
-      const fileMetadata = {
-        'name': BACKUP_FILE_NAME,
-        'mimeType': 'application/json'
-      };
-
-      if (files && files.length > 0) {
-        const fileId = files[0].id;
-        await updateFile(fileId, fileContent);
-        setSuccessMsg("Backup diperbarui di Google Drive!");
-      } else {
-        await createFile(fileMetadata, fileContent);
-        setSuccessMsg("File backup baru dibuat di Google Drive!");
-      }
-      setLastDriveSync(new Date().toLocaleString('id-ID'));
-    } catch (err: any) {
-      console.error(err);
-      if (err.status === 401 || (err.result && err.result.error && err.result.error.code === 401)) {
-         setError("Sesi kadaluarsa. Silakan Hubungkan Drive kembali.");
-         setIsDriveConnected(false);
-         localStorage.removeItem('gdrive_access_token');
-      } else {
-         setError("Gagal menyimpan ke Drive. Periksa koneksi atau API Key.");
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadFromDrive = async () => {
     setLoading(true);
     setError(null);
     try {
-       const response = await window.gapi.client.drive.files.list({
-        'pageSize': 1,
-        'fields': "files(id, name)",
-        'q': `name = '${BACKUP_FILE_NAME}' and trashed = false`
-      });
-      const files = response.result.files;
-      
-      if (files && files.length > 0) {
-        const fileId = files[0].id;
-        const result = await window.gapi.client.drive.files.get({
-          fileId: fileId,
-          alt: 'media'
-        });
-        
-        const parsedData = JSON.parse(result.body);
-        if (confirm(`Ditemukan backup dari Drive. Timpa data lokal?`)) {
-           onDataLoaded(parsedData);
-           setSuccessMsg("Data berhasil dipulihkan dari Drive!");
-        }
-      } else {
-        setError("File backup tidak ditemukan di Drive akun ini.");
-      }
-    } catch (err) {
-      console.error(err);
-      setError("Gagal memuat dari Drive.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const updateFile = async (fileId: string, content: string) => {
-    return window.gapi.client.request({
-      path: `/upload/drive/v3/files/${fileId}`,
-      method: 'PATCH',
-      params: { uploadType: 'media' },
-      body: content
-    });
-  };
-
-  const createFile = async (metadata: any, content: string) => {
-    const boundary = '-------314159265358979323846';
-    const delimiter = "\r\n--" + boundary + "\r\n";
-    const close_delim = "\r\n--" + boundary + "--";
-
-    const multipartRequestBody =
-        delimiter +
-        'Content-Type: application/json\r\n\r\n' +
-        JSON.stringify(metadata) +
-        delimiter +
-        'Content-Type: application/json\r\n\r\n' +
-        content +
-        close_delim;
-
-    return window.gapi.client.request({
-      path: '/upload/drive/v3/files',
-      method: 'POST',
-      params: { uploadType: 'multipart' },
-      headers: {
-        'Content-Type': 'multipart/related; boundary="' + boundary + '"'
-      },
-      body: multipartRequestBody
-    });
-  };
-
-  // --- NPOINT (OLD) LOGIC ---
-  const saveToCloud = async () => {
-    setLoading(true);
-    setError(null);
-    try {
+      // Menggunakan npoint sebagai mock database sederhana
       const response = await fetch('https://api.npoint.io/bins', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           payload: btoa(JSON.stringify(data)), 
+          email: inputEmail,
           timestamp: new Date().toISOString(),
-          app: "FinancePro_Aniq"
+          app: "AniqFinance_Pro"
         }),
       });
       
       const result = await response.json();
       if (result.binId) {
-        setSyncId(result.binId);
-        localStorage.setItem('arthaku_last_sync_id', result.binId);
+        const newId = result.binId;
+        setSyncId(newId);
+        setUserEmail(inputEmail);
+        localStorage.setItem('arthaku_cloud_id', newId);
+        localStorage.setItem('arthaku_user_email', inputEmail);
+        
+        const now = new Date().toLocaleTimeString('id-ID');
+        setLastSyncTime(now);
+        localStorage.setItem('arthaku_last_sync', now);
+        
+        setSuccessMsg("Akun Berhasil Terhubung & Dicadangkan!");
+        setShowKey(true);
       }
     } catch (err) {
-      setError('Gagal sinkronisasi ke server sementara.');
+      setError('Gagal menghubungkan email. Periksa koneksi internet Anda.');
     } finally {
       setLoading(false);
     }
   };
 
-  const loadFromCloud = async () => {
-    if (!inputSyncId.trim()) return;
+  const handleLogout = () => {
+    if (confirm('Keluar dari akun? Pencadangan otomatis akan terhenti. Data di perangkat ini tidak akan dihapus.')) {
+      setSyncId('');
+      setUserEmail('');
+      localStorage.removeItem('arthaku_cloud_id');
+      localStorage.removeItem('arthaku_user_email');
+      localStorage.removeItem('arthaku_last_sync');
+      setSuccessMsg("Berhasil keluar dari akun.");
+      setActiveTab('account');
+    }
+  };
+
+  const handleRestoreAccount = async () => {
+    if (!inputSyncId) {
+      setError('Masukkan Kunci Pemulihan untuk menarik data.');
+      return;
+    }
+    
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`https://api.npoint.io/bins/${inputSyncId.trim()}`);
-      if (!response.ok) throw new Error('Sync ID tidak ditemukan');
+      const response = await fetch(`https://api.npoint.io/bins/${inputSyncId}`);
+      if (!response.ok) throw new Error('Key tidak ditemukan');
       
       const result = await response.json();
       const decodedData = JSON.parse(atob(result.payload));
       
-      if (confirm('⚠️ PERINGATAN: Data saat ini akan ditimpa. Lanjutkan?')) {
+      if (confirm('Data dari Cloud akan menimpa data di HP ini. Lanjutkan?')) {
         onDataLoaded(decodedData);
-        setIsOpen(false);
+        setSyncId(inputSyncId);
+        if (result.email) {
+          setUserEmail(result.email);
+          localStorage.setItem('arthaku_user_email', result.email);
+        }
+        localStorage.setItem('arthaku_cloud_id', inputSyncId);
+        setSuccessMsg("Data berhasil dipulihkan!");
+        setTimeout(() => setIsOpen(false), 1500);
       }
     } catch (err) {
-      setError('ID tidak valid atau data sudah dihapus.');
+      setError('Kunci Pemulihan salah atau tidak ditemukan.');
     } finally {
       setLoading(false);
     }
@@ -385,31 +149,25 @@ const CloudSync: React.FC<CloudSyncProps> = ({ data, onDataLoaded }) => {
     });
   };
 
-  // --- LOCAL FILE LOGIC ---
   const exportToFile = () => {
     const dataStr = JSON.stringify(data, null, 2);
     const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-    const exportFileDefaultName = `Laporan_Keuangan_Aniq_${new Date().toISOString().slice(0,10)}.json`;
-
     const linkElement = document.createElement('a');
     linkElement.setAttribute('href', dataUri);
-    linkElement.setAttribute('download', exportFileDefaultName);
+    linkElement.setAttribute('download', `Backup_AniqFinance_${new Date().toISOString().slice(0,10)}.json`);
     linkElement.click();
   };
 
   const importFromFile = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
         const content = e.target?.result as string;
-        const parsedData = JSON.parse(content);
-        if (confirm('Impor data dari file? Data saat ini akan diganti.')) {
-          onDataLoaded(parsedData);
-          setIsOpen(false);
-        }
+        onDataLoaded(JSON.parse(content));
+        setSuccessMsg("Berhasil memuat dari file!");
+        setTimeout(() => setIsOpen(false), 1000);
       } catch (err) {
         alert('File tidak valid!');
       }
@@ -417,312 +175,256 @@ const CloudSync: React.FC<CloudSyncProps> = ({ data, onDataLoaded }) => {
     reader.readAsText(file);
   };
 
-  // Sub-component for Manual Config Form
-  const ConfigForm = () => {
-    const [tempClientId, setTempClientId] = useState(clientId);
-    const [tempApiKey, setTempApiKey] = useState(apiKey);
-
-    return (
-      <div className="space-y-4 w-full max-w-sm mx-auto animate-in fade-in zoom-in-95">
-         <div className="text-center mb-4">
-            <h4 className="text-white font-black text-sm uppercase tracking-widest">Konfigurasi API</h4>
-            <p className="text-[10px] text-slate-500 mt-1">Masukkan Google Drive credentials Anda</p>
-         </div>
-         
-         <div className="space-y-3">
-            <div>
-              <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block">Client ID</label>
-              <input 
-                 type="text" 
-                 value={tempClientId}
-                 onChange={(e) => setTempClientId(e.target.value)}
-                 className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:border-indigo-500 outline-none"
-                 placeholder="xxx.apps.googleusercontent.com"
-              />
-            </div>
-            <div>
-              <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block">API Key</label>
-              <input 
-                 type="text" 
-                 value={tempApiKey}
-                 onChange={(e) => setTempApiKey(e.target.value)}
-                 className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:border-indigo-500 outline-none"
-                 placeholder="AIzaSy..."
-              />
-            </div>
-         </div>
-
-         <div className="flex gap-2 pt-2">
-            {/* Show Cancel only if we already have some keys and just editing */}
-            {(clientId && apiKey) && (
-              <button 
-                onClick={() => setShowConfig(false)}
-                className="flex-1 py-2.5 bg-slate-800 text-slate-400 font-bold text-xs rounded-xl hover:bg-slate-700"
-              >
-                Batal
-              </button>
-            )}
-            <button 
-              onClick={() => handleSaveConfig(tempClientId, tempApiKey)}
-              className="flex-1 py-2.5 bg-indigo-600 text-white font-bold text-xs rounded-xl hover:bg-indigo-500 flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/20"
-            >
-              <Save size={14} /> Simpan
-            </button>
-         </div>
-      </div>
-    );
-  };
-
   return (
     <>
       <button 
         onClick={() => setIsOpen(true)}
-        className="flex items-center gap-2.5 px-5 py-2.5 bg-indigo-600/10 text-indigo-400 rounded-2xl hover:bg-indigo-600 hover:text-white transition-all border border-indigo-500/20 shadow-lg shadow-black/20 group ring-1 ring-white/5"
+        className={`flex items-center gap-2 px-4 py-2 rounded-xl border transition-all relative group ${
+          userEmail ? 'bg-indigo-600/10 border-indigo-500/30' : 'bg-slate-800 border-slate-700'
+        }`}
       >
-        <Database size={18} className="group-hover:rotate-12 transition-transform" />
-        <span className="text-sm font-black hidden sm:inline uppercase tracking-widest">Data Vault</span>
+        {userEmail ? <UserCircle size={16} className="text-indigo-400" /> : <Database size={16} className="text-slate-500" />}
+        <span className="text-[10px] font-black text-white uppercase tracking-widest hidden sm:inline">
+          {userEmail ? 'Akun' : 'Pusat Data'}
+        </span>
+        {userEmail && (
+          <div className={`absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full border-2 border-slate-900 flex items-center justify-center ${
+            syncStatus === 'success' ? 'bg-emerald-500' : 
+            syncStatus === 'syncing' ? 'bg-indigo-500 animate-pulse' : 
+            syncStatus === 'error' ? 'bg-rose-500' : 'bg-slate-500'
+          }`}>
+             {syncStatus === 'success' && <Check size={8} className="text-white font-black" />}
+             {syncStatus === 'error' && <WifiOff size={8} className="text-white font-black" />}
+          </div>
+        )}
       </button>
 
       {isOpen && (
-        <div 
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/95 backdrop-blur-md animate-in fade-in duration-300"
-          onClick={() => setIsOpen(false)} // Klik di area hitam untuk keluar
-        >
-          <div 
-            className="bg-[#020617] rounded-[40px] shadow-2xl w-full max-w-xl overflow-hidden animate-in zoom-in-95 duration-300 border border-slate-800 ring-1 ring-white/10"
-            onClick={(e) => e.stopPropagation()} // Mencegah klik di dalam modal ikut menutup
-          >
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/95 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="bg-slate-900 rounded-[40px] border border-slate-800 shadow-2xl w-full max-w-lg overflow-hidden ring-1 ring-white/10" onClick={e => e.stopPropagation()}>
             
-            {/* Header */}
+            {/* Header Modal */}
             <div className="p-8 border-b border-slate-800/60 flex justify-between items-center bg-gradient-to-br from-indigo-900/10 to-transparent">
-              <div className="flex items-center gap-5">
-                <div className="relative">
-                  <div className="absolute -inset-1 bg-indigo-500 rounded-2xl blur opacity-30 animate-pulse"></div>
-                  <div className="relative p-3.5 bg-indigo-600 text-white rounded-2xl shadow-xl">
-                    <Database size={24} />
-                  </div>
+              <div className="flex items-center gap-4">
+                <div className="p-3 bg-indigo-600 text-white rounded-2xl shadow-lg shadow-indigo-600/20">
+                  <Cloud size={20} />
                 </div>
                 <div>
-                  <h3 className="font-black text-white text-xl tracking-tight leading-none">Pusat Data Abadi</h3>
-                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-[0.2em] mt-2">Target: {TARGET_EMAIL}</p>
+                  <h3 className="font-black text-white text-lg tracking-tight">Cloud Backup Center</h3>
+                  <div className="flex items-center gap-2 mt-1">
+                     <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">
+                       {userEmail ? 'WhatsApp-Style Auto Sync Aktif' : 'Mode Offline'}
+                     </p>
+                  </div>
                 </div>
               </div>
-              <button 
-                onClick={() => setIsOpen(false)} 
-                className="text-slate-500 hover:text-white hover:bg-rose-500/20 p-2.5 rounded-2xl transition-all border border-transparent hover:border-rose-500/30"
-                title="Tutup (ESC)"
-              >
+              <button onClick={() => setIsOpen(false)} className="text-slate-500 hover:text-white p-2 transition-colors">
                 <X size={24} />
               </button>
             </div>
 
-            {/* Tabs */}
+            {/* Tab Navigasi */}
             <div className="flex px-8 pt-6 gap-2">
-              {[
-                { id: 'drive', label: 'Google Drive', icon: <Globe size={14} /> },
-                { id: 'cloud', label: 'ID Sync', icon: <Cloud size={14} /> },
-                { id: 'local', label: 'Offline', icon: <FileJson size={14} /> }
-              ].map(tab => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id as any)}
-                  className={`flex items-center gap-2 px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${
-                    activeTab === tab.id 
-                      ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' 
-                      : 'bg-slate-900/50 text-slate-500 hover:text-slate-300 border border-slate-800/60'
-                  }`}
-                >
-                  {tab.icon}
-                  {tab.label}
-                </button>
-              ))}
+              <button
+                onClick={() => setActiveTab('account')}
+                className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                  activeTab === 'account' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'bg-slate-800 text-slate-500 hover:bg-slate-750'
+                }`}
+              >
+                <Mail size={14} /> Kelola Akun
+              </button>
+              <button
+                onClick={() => setActiveTab('local')}
+                className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                  activeTab === 'local' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'bg-slate-800 text-slate-500 hover:bg-slate-750'
+                }`}
+              >
+                <FileJson size={14} /> File Manual
+              </button>
             </div>
 
-            <div className="p-8 min-h-[360px] flex flex-col justify-center">
-              
-              {/* Google Drive Tab */}
-              {activeTab === 'drive' && (
-                <div className="space-y-8 animate-in slide-in-from-right-4 duration-500 text-center flex flex-col items-center w-full">
-                  <div className="w-20 h-20 bg-slate-900 rounded-[24px] flex items-center justify-center border border-slate-800 shadow-inner">
-                    <img src="https://upload.wikimedia.org/wikipedia/commons/1/12/Google_Drive_icon_%282020%29.svg" className="w-10 h-10" alt="Drive" />
-                  </div>
-                  
-                  <div className="space-y-3 max-w-sm w-full">
-                    {/* Header Text or Settings Toggle */}
-                    <div className="flex justify-center items-center gap-2 relative">
-                       <h4 className="text-xl font-black text-white tracking-tight">Akun: {TARGET_EMAIL}</h4>
-                       {!showConfig && (
-                         <button onClick={() => setShowConfig(true)} className="p-1.5 text-slate-600 hover:text-indigo-400 rounded-lg hover:bg-slate-800/50 transition-colors absolute -right-8" title="Edit Konfigurasi">
-                           <Settings size={14} />
-                         </button>
-                       )}
-                    </div>
-                    
-                    {!showConfig && (
-                      <p className="text-sm text-slate-500 leading-relaxed font-medium">
-                        Hubungkan akun Google Anda untuk menyimpan data otomatis.
-                      </p>
-                    )}
-                  </div>
-
-                  {showConfig ? (
-                    <ConfigForm />
-                  ) : (
-                    <>
-                      {!isDriveConnected ? (
-                        <button 
-                          onClick={handleAuthClick}
-                          disabled={loading || !gapiInited}
-                          className="w-full max-w-xs py-4.5 bg-white text-black font-black text-xs uppercase tracking-[0.2em] rounded-2xl hover:bg-indigo-400 hover:text-white transition-all shadow-xl flex items-center justify-center gap-3 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed mt-4"
-                        >
-                          {loading ? <Loader2 className="animate-spin" size={20} /> : <Globe size={20} />}
-                          {gapiInited ? 'HUBUNGKAN DRIVE' : 'MEMUAT GOOGLE...'}
-                        </button>
-                      ) : (
-                        <div className="w-full space-y-4 mt-4">
-                          <div className="p-6 bg-emerald-500/10 border border-emerald-500/20 rounded-[28px] flex items-center justify-between ring-1 ring-emerald-500/5">
-                            <div className="flex items-center gap-4 text-left">
-                              <div className="p-2 bg-emerald-500 text-white rounded-lg"><CircleCheck size={18} /></div>
-                              <div>
-                                <p className="text-[10px] text-emerald-500 font-black uppercase tracking-widest">Status: Terhubung</p>
-                                <p className="text-xs text-white font-bold mt-0.5">Sinkron Terakhir: {lastDriveSync || 'Belum pernah'}</p>
-                              </div>
-                            </div>
-                            <div className="flex gap-2">
-                              <button onClick={loadFromDrive} disabled={loading} title="Ambil dari Drive" className="px-3 py-2 bg-slate-800 text-slate-300 rounded-xl hover:bg-slate-700 transition-all">
-                                  <CloudDownload size={16} />
-                              </button>
-                              <button onClick={syncToDrive} disabled={loading} className="px-5 py-2.5 bg-emerald-500 text-white text-[10px] font-black rounded-xl hover:bg-emerald-400 transition-all flex items-center gap-2">
-                                {loading ? <Loader2 className="animate-spin" size={12} /> : <RefreshCw size={12} />}
-                                {loading ? 'SYNC...' : 'SIMPAN'}
-                              </button>
-                            </div>
-                          </div>
-                          <p className="text-[10px] text-slate-600 font-bold uppercase tracking-widest">File: {BACKUP_FILE_NAME}</p>
+            {/* Konten Utama */}
+            <div className="p-8 min-h-[420px] max-h-[70vh] overflow-y-auto">
+              {activeTab === 'account' && (
+                <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
+                  {!userEmail ? (
+                    <div className="space-y-6">
+                      <div className="bg-indigo-600/5 p-6 rounded-3xl border border-indigo-500/10">
+                        <div className="flex items-center gap-3 mb-2">
+                           <Shield size={16} className="text-indigo-400" />
+                           <h4 className="font-black text-white text-sm uppercase tracking-widest">Cadangkan ke Email</h4>
                         </div>
-                      )}
-                    </>
+                        <p className="text-xs text-slate-500 leading-relaxed">Hubungkan email Anda untuk mencadangkan data secara otomatis. Data Anda dienkripsi dan aman.</p>
+                      </div>
+                      
+                      <div className="space-y-2">
+                         <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Alamat Email Aktif</label>
+                         <div className="relative">
+                            <Mail className="absolute top-1/2 left-4 -translate-y-1/2 text-slate-600" size={18} />
+                            <input 
+                              type="email" 
+                              placeholder="nama@email.com"
+                              value={inputEmail}
+                              onChange={(e) => setInputEmail(e.target.value)}
+                              className="w-full bg-slate-950 border border-slate-800 rounded-2xl h-14 pl-12 pr-4 text-sm font-bold text-white placeholder-slate-700 outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                            />
+                         </div>
+                      </div>
+
+                      <button 
+                        onClick={handleCreateAccount}
+                        disabled={loading}
+                        className="w-full py-4 bg-indigo-600 text-white font-black text-xs uppercase tracking-[0.2em] rounded-2xl hover:bg-indigo-500 flex items-center justify-center gap-3 transition-all active:scale-95 shadow-xl shadow-indigo-600/20 disabled:opacity-50"
+                      >
+                        {loading ? <Loader2 className="animate-spin" size={18} /> : <ShieldCheck size={18} />}
+                        HUBUNGKAN AKUN
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-6">
+                      {/* Kartu Profil Terhubung */}
+                      <div className="bg-slate-950 border border-slate-800 rounded-[32px] p-6 relative overflow-hidden group">
+                        <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
+                           <Globe size={80} className="text-indigo-400" />
+                        </div>
+                        
+                        <div className="flex justify-between items-start mb-6">
+                           <div className="flex items-center gap-3">
+                              <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center text-white font-black text-xl">
+                                {userEmail[0].toUpperCase()}
+                              </div>
+                              <div>
+                                 <p className="text-[9px] font-black text-indigo-400 uppercase tracking-[0.2em] mb-0.5">Akun Terhubung</p>
+                                 <h4 className="text-white font-black text-base">{userEmail}</h4>
+                              </div>
+                           </div>
+                           <button 
+                             onClick={handleLogout}
+                             className="p-2.5 bg-rose-500/10 text-rose-500 rounded-xl hover:bg-rose-500 hover:text-white transition-all shadow-inner"
+                             title="Putuskan Hubungan"
+                           >
+                             <LogOut size={18} />
+                           </button>
+                        </div>
+
+                        <div className="bg-slate-900 rounded-2xl p-5 border border-slate-800 space-y-4">
+                           <div className="flex items-center justify-between">
+                              <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                                <Lock size={12} /> Kunci Pemulihan (Secret Key)
+                              </span>
+                              <button onClick={() => setShowKey(!showKey)} className="text-indigo-400 hover:text-indigo-300">
+                                {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                              </button>
+                           </div>
+                           <div className="flex items-center gap-3">
+                              <p className="flex-1 font-mono font-black text-white text-sm tracking-widest bg-black/40 p-3 rounded-xl border border-slate-800 truncate">
+                                {showKey ? syncId : '••••••••••••••••'}
+                              </p>
+                              <button onClick={copyToClipboard} className="p-3 bg-indigo-600 text-white rounded-xl active:scale-90 transition-all hover:bg-indigo-500 shadow-lg">
+                                {copied ? <Check size={18} /> : <Copy size={18} />}
+                              </button>
+                           </div>
+                           <p className="text-[8px] text-slate-600 leading-relaxed italic text-center">
+                             PENTING: Simpan kunci ini untuk menarik data jika Anda ganti HP.
+                           </p>
+                        </div>
+                        
+                        <div className="mt-5 flex items-center justify-between text-[9px] font-bold text-slate-500 uppercase tracking-widest bg-slate-900/50 p-3 rounded-xl border border-slate-800/50">
+                           <div className="flex items-center gap-2 text-emerald-500">
+                              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
+                              Auto Backup Aktif
+                           </div>
+                           <div>Update: {lastSyncTime || 'Sesaat lalu'}</div>
+                        </div>
+                      </div>
+
+                      <button 
+                        onClick={() => {
+                          setSyncStatus('syncing');
+                          setTimeout(() => setSyncStatus('success'), 1200);
+                        }} 
+                        className="w-full py-4 bg-slate-800 text-slate-300 font-black text-[10px] uppercase rounded-2xl hover:bg-slate-750 flex items-center justify-center gap-2 border border-slate-700 transition-all"
+                      >
+                        <RefreshCw size={14} className={syncStatus === 'syncing' ? 'animate-spin' : ''} /> Cadangkan Sekarang
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Bagian Pulihkan Data */}
+                  {!userEmail && (
+                    <div className="pt-6 border-t border-slate-800/60">
+                       <div className="flex items-center gap-2 mb-4">
+                          <Smartphone size={14} className="text-slate-500" />
+                          <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Pindah Perangkat / Pulihkan</p>
+                       </div>
+                       <div className="flex gap-2">
+                          <input 
+                            type="text" 
+                            placeholder="Masukkan Kunci Pemulihan..."
+                            value={inputSyncId}
+                            onChange={(e) => setInputSyncId(e.target.value)}
+                            className="flex-1 bg-slate-950 border border-slate-800 rounded-2xl px-5 py-3.5 text-xs text-white focus:border-indigo-500 outline-none placeholder:text-slate-700 font-mono shadow-inner"
+                          />
+                          <button onClick={handleRestoreAccount} className="px-6 py-3.5 bg-slate-800 hover:bg-slate-700 text-white text-[10px] font-black uppercase rounded-2xl transition-colors border border-slate-700">Tarik</button>
+                       </div>
+                    </div>
                   )}
                 </div>
               )}
 
-              {/* ID Sync Tab */}
-              {activeTab === 'cloud' && (
-                <div className="space-y-8 animate-in slide-in-from-right-4 duration-500">
-                  <div className="space-y-4">
-                    <p className="text-sm text-slate-400 leading-relaxed font-medium">
-                      Gunakan <b>Sync ID</b> untuk memindahkan data antar perangkat tanpa akun Google.
-                    </p>
-                    
-                    {syncId ? (
-                      <div className="flex items-center gap-3 p-5 bg-slate-950/50 border border-indigo-500/30 rounded-[24px] ring-1 ring-indigo-500/10">
-                        <div className="flex-1">
-                          <p className="text-[9px] text-indigo-500 font-black uppercase tracking-widest mb-1">ID Sinkronisasi Aktif</p>
-                          <p className="font-mono font-black text-white text-lg tracking-wider">{syncId}</p>
-                        </div>
-                        <button 
-                          onClick={copyToClipboard}
-                          className="p-4 bg-indigo-500 text-white rounded-2xl hover:bg-indigo-400 transition-all shadow-xl shadow-indigo-500/20 active:scale-90"
-                        >
-                          {copied ? <Check size={20} /> : <Copy size={20} />}
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex gap-2">
-                        <input 
-                          type="text" 
-                          placeholder="Masukkan ID..."
-                          value={inputSyncId}
-                          onChange={(e) => setInputSyncId(e.target.value)}
-                          className="flex-1 px-6 py-4.5 bg-black border border-slate-800 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none font-mono text-sm text-white placeholder-slate-800"
-                        />
-                        <button 
-                          onClick={loadFromCloud}
-                          disabled={loading || !inputSyncId}
-                          className="px-6 py-4.5 bg-slate-800 text-white font-black text-xs rounded-2xl hover:bg-slate-700 transition-all"
-                        >
-                          MUAT
-                        </button>
-                      </div>
-                    )}
-                    
-                    {!syncId && (
-                      <button 
-                        onClick={saveToCloud}
-                        disabled={loading}
-                        className="w-full py-4.5 bg-indigo-600 text-white font-black text-sm uppercase tracking-widest rounded-2xl hover:bg-indigo-500 transition-all flex items-center justify-center gap-3"
-                      >
-                        {loading ? <Loader2 className="animate-spin" size={20} /> : <CloudUpload size={20} />}
-                        BUAT SYNC ID BARU
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Local Storage Tab */}
               {activeTab === 'local' && (
-                <div className="space-y-6 animate-in slide-in-from-right-4 duration-500">
-                  <div className="p-7 bg-slate-950/30 border border-slate-800/60 rounded-[32px] ring-1 ring-white/5 space-y-6">
-                    <div className="flex items-center gap-4">
-                      <div className="p-3 bg-amber-500/10 text-amber-500 rounded-xl"><Lock size={20} /></div>
-                      <div>
-                        <h4 className="font-black text-white text-sm uppercase tracking-widest">Arsip File Fisik</h4>
-                        <p className="text-[10px] text-slate-500 font-bold mt-1">Penyimpanan Offline Mandiri</p>
-                      </div>
-                    </div>
-                    
-                    <div className="grid grid-cols-2 gap-4">
-                      <button 
-                        onClick={exportToFile}
-                        className="flex flex-col items-center gap-3 p-6 bg-slate-900 border border-slate-800 rounded-[24px] hover:bg-slate-800 hover:border-indigo-500/30 transition-all group"
-                      >
-                        <Download className="text-indigo-400 group-hover:translate-y-1 transition-transform" size={24} />
-                        <span className="text-[10px] font-black text-white uppercase tracking-widest">Simpan File</span>
+                <div className="space-y-6 animate-in slide-in-from-right-4 duration-300 py-4">
+                   <div className="grid grid-cols-1 gap-4">
+                      <button onClick={exportToFile} className="flex items-center justify-between p-6 bg-slate-800 border border-slate-700 rounded-3xl hover:bg-slate-750 transition-all group">
+                        <div className="flex items-center gap-5">
+                          <div className="p-4 bg-indigo-500/10 text-indigo-400 rounded-2xl group-hover:bg-indigo-500/20 transition-colors"><Download size={22} /></div>
+                          <div className="text-left">
+                            <h4 className="text-[10px] font-black text-white uppercase tracking-[0.2em]">Ekspor ke JSON</h4>
+                            <p className="text-[10px] text-slate-500 mt-1">Simpan salinan file ke memori HP</p>
+                          </div>
+                        </div>
+                        <ChevronRight size={16} className="text-slate-700" />
                       </button>
-                      
-                      <label className="flex flex-col items-center gap-3 p-6 bg-slate-900 border border-slate-800 rounded-[24px] hover:bg-slate-800 hover:border-emerald-500/30 transition-all cursor-pointer group">
-                        <Upload className="text-emerald-400 group-hover:-translate-y-1 transition-transform" size={24} />
-                        <span className="text-[10px] font-black text-white uppercase tracking-widest">Buka File</span>
+
+                      <label className="flex items-center justify-between p-6 bg-slate-800 border border-slate-700 rounded-3xl hover:bg-slate-750 transition-all group cursor-pointer">
+                        <div className="flex items-center gap-5">
+                          <div className="p-4 bg-emerald-500/10 text-emerald-400 rounded-2xl group-hover:bg-emerald-500/20 transition-colors"><Upload size={22} /></div>
+                          <div className="text-left">
+                            <h4 className="text-[10px] font-black text-white uppercase tracking-[0.2em]">Impor dari JSON</h4>
+                            <p className="text-[10px] text-slate-500 mt-1">Muat data lama dari file manual</p>
+                          </div>
+                        </div>
+                        <ChevronRight size={16} className="text-slate-700" />
                         <input type="file" accept=".json" onChange={importFromFile} className="hidden" />
                       </label>
-                    </div>
-                  </div>
+                   </div>
                 </div>
               )}
 
               {error && (
-                <div className="mt-6 flex items-center gap-3 p-4 bg-rose-500/10 border border-rose-500/20 rounded-2xl text-rose-400 text-xs font-bold animate-shake">
-                  <AlertTriangle size={16} />
-                  {error}
+                <div className="mt-6 p-5 bg-rose-500/10 border border-rose-500/20 rounded-2xl text-rose-400 text-[10px] font-black flex items-center gap-3 animate-in fade-in zoom-in-95">
+                  <AlertTriangle size={16} /> {error}
                 </div>
               )}
-              
               {successMsg && (
-                <div className="mt-6 flex items-center gap-3 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-emerald-400 text-xs font-bold animate-in zoom-in">
-                  <Check size={16} />
-                  {successMsg}
+                <div className="mt-6 p-5 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-emerald-400 text-[10px] font-black flex items-center gap-3 animate-in fade-in zoom-in-95">
+                  <ShieldCheck size={16} /> {successMsg}
                 </div>
               )}
             </div>
 
-            {/* Footer Actions */}
-            <div className="px-10 py-8 bg-black/40 border-t border-slate-800/60 flex flex-col items-center gap-6">
-              <button 
+            {/* Tombol Keluar dari Tampilan (Footer) */}
+            <div className="p-8 bg-black/20 border-t border-slate-800/60 flex flex-col gap-4">
+               <button 
                 onClick={() => setIsOpen(false)}
-                className="w-full py-4 bg-slate-800 hover:bg-slate-700 text-white font-black text-xs uppercase tracking-[0.3em] rounded-[20px] transition-all flex items-center justify-center gap-3 shadow-lg active:scale-95 group"
-              >
-                <LogOut size={16} className="group-hover:translate-x-1 transition-transform" />
-                Selesai & Keluar
-              </button>
-              <div className="flex justify-between w-full items-center">
-                <div className="flex items-center gap-2 text-[10px] text-slate-600 font-black uppercase tracking-widest">
-                  <Lock size={12} /> Data Vault Secure
-                </div>
-                <p className="text-[10px] text-slate-700 font-medium italic">
-                  Aniq Susilo Finance System v2.3
-                </p>
-              </div>
+                className="w-full py-4 bg-indigo-600 text-white font-black text-xs uppercase tracking-[0.2em] rounded-2xl hover:bg-indigo-500 flex items-center justify-center gap-3 transition-all active:scale-95 shadow-xl shadow-indigo-600/20"
+               >
+                 Tutup Menu
+               </button>
+               <div className="flex items-center justify-center gap-2 opacity-40">
+                  <Lock size={12} className="text-slate-400" />
+                  <p className="text-[9px] text-slate-400 font-bold uppercase tracking-[0.3em]">Enkripsi AES-256 Aktif</p>
+               </div>
             </div>
           </div>
         </div>

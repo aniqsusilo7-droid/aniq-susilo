@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { FinanceItem, CategoryType } from '../types';
-import { Plus, Trash2, Layers, ChevronRight, Wallet2 } from 'lucide-react';
+import { Plus, Trash2, Layers, ChevronRight, Wallet2, Tag } from 'lucide-react';
 
 const formatInput = (num: number) => {
   if (num === 0) return '';
@@ -162,6 +162,7 @@ const ExpenseTable: React.FC<ExpenseTableProps> = ({
         
         const masterAllocationItem = items.find(item => item.category === category && item.name === 'ALOKASI UTAMA');
         const categoryItems = items.filter(item => item.category === category && item.name !== 'ALOKASI UTAMA');
+        const itemCount = categoryItems.length;
 
         let categoryTotalBudget = 0;
         let categoryTotalActual = 0;
@@ -194,18 +195,27 @@ const ExpenseTable: React.FC<ExpenseTableProps> = ({
                    <Layers size={18} />
                 </div>
                 <div>
-                  <h3 className="font-black text-slate-100 uppercase tracking-tight text-sm">{category}</h3>
-                  <div className="flex flex-col mt-0.5 space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-black text-slate-100 uppercase tracking-tight text-sm">{category}</h3>
+                    <span className="px-2 py-0.5 bg-slate-700/50 rounded-md text-[8px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1">
+                      <Tag size={8} /> {itemCount} Item
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4 mt-1.5">
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Alokasi:</span>
+                      <span className="text-[9px] text-slate-500 font-bold uppercase tracking-widest whitespace-nowrap">Alokasi:</span>
                       <span className="text-[10px] font-black text-indigo-400">{formatter.format(categoryTotalBudget)}</span>
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">
-                        {isUnexpectedCategory ? 'Terpakai:' : 'Realisasi:'}
-                      </span>
+                      <span className="text-[9px] text-slate-500 font-bold uppercase tracking-widest whitespace-nowrap">Realisasi:</span>
                       <span className={`text-[10px] font-black ${usageRatio > 1 ? 'text-rose-400' : 'text-emerald-400'}`}>
                         {formatter.format(categoryTotalActual)}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[9px] text-slate-500 font-bold uppercase tracking-widest whitespace-nowrap">Sisa:</span>
+                      <span className={`text-[10px] font-black ${remainingBudget < 0 ? 'text-rose-400' : 'text-indigo-400'}`}>
+                        {formatter.format(remainingBudget)}
                       </span>
                     </div>
                   </div>
@@ -214,7 +224,7 @@ const ExpenseTable: React.FC<ExpenseTableProps> = ({
 
               <div className="flex items-center gap-4">
                 <div className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-tighter ${usageRatio > 1 ? 'bg-rose-500/20 text-rose-400' : 'bg-indigo-500/20 text-indigo-400'}`}>
-                  {isUnexpectedCategory && usageRatio <= 1 ? `Sisa: ${formatter.format(remainingBudget)}` : `${(usageRatio * 100).toFixed(0)}%`}
+                  {`${(usageRatio * 100).toFixed(0)}%`}
                 </div>
                 <div className={`transition-transform duration-300 ${isCollapsed ? '' : 'rotate-90'}`}>
                   <ChevronRight size={20} className="text-slate-600" />
